@@ -1,3 +1,7 @@
+mod error;
+mod gacha_core;
+
+use gacha_core::GachaSystem;
 use gdnative::prelude::*;
 
 #[derive(NativeClass)]
@@ -18,6 +22,7 @@ impl HelloWorld {
 
 fn init(handle: InitHandle) {
     handle.add_class::<HelloWorld>();
+    handle.add_class::<GachaSystem>();
 }
 
 godot_init!(init);

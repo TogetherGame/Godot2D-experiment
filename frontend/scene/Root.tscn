@@ -6,3 +6,18 @@
 
 [node name="gacha_controller" type="Node" parent="."]
 script = ExtResource( 1 )
+chances = 10
+
+[node name="single_pull" type="Button" parent="."]
+margin_right = 158.0
+margin_bottom = 40.0
+text = "Single Pull"
+
+[node name="multi_pull" type="Button" parent="."]
+margin_left = 248.0
+margin_right = 406.0
+margin_bottom = 40.0
+text = "10 Pull"
+
+[connection signal="pressed" from="single_pull" to="gacha_controller" method="pull" binds= [ 1 ]]
+[connection signal="pressed" from="multi_pull" to="gacha_controller" method="pull" binds= [ 10 ]]
