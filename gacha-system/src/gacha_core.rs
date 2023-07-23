@@ -4,6 +4,7 @@ use std::{collections::HashMap, ops::Range};
 
 use crate::error::{GachaError, Result};
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(ToVariant, FromVariant, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Rarity {
     SSR,
@@ -58,7 +59,9 @@ impl GachaSystem {
         GachaSystem {
             pity: 10,
             hard_pity: 50,
-            rarities: default_rarities.into(),
+            rarities: default_rarities,
+            // TODO: set to 0 before publish
+            chances: 100,
             ..Default::default()
         }
     }
@@ -72,25 +75,24 @@ impl GachaSystem {
     fn pull(&mut self, num: u32) -> Vec<GachaItem> {
         let mut result = vec![];
         let mut rng = thread_rng();
-        let gen_limit: f64 = self.rarities.iter().map(|(_, ra)| ra).sum();
         let num_limit = num.min(self.chances);
 
         for _ in 0..num_limit {
-            if let Some(pity_rarity) = self.get_pity() {
-                result.push(self.gacha_by_rarity(pity_rarity, &mut rng).unwrap());
-                continue;
-            }
+            let maybe_rarities = self.pity_rarities_and_rate();
+            let available_rarities = maybe_rarities.as_ref().unwrap_or(&self.rarities);
+            let gen_limit: f64 = available_rarities.iter().map(|(_, ra)| ra).sum();
             // generate a random float within the limit
             let f = rng.gen_range(0.0..gen_limit);
-
-            for (rarity, range) in rarity_range(&self.rarities) {
-                if range.contains(&f) {
-                    godot_print!("rolled: {f}, you got a: {:?} item", rarity);
-                    // FIXME: change this to randomly draw item from poll later
-                    result.push(self.gacha_by_rarity(rarity, &mut rng).unwrap());
-                    break;
-                }
-            }
+            let (pull_result, _) = rarity_range(available_rarities)
+                .iter()
+                .find(|(_, range)| range.contains(&f))
+                .expect(&format!(
+                    "unknown error: invalid gacha pull with random number '{f}'"
+                ))
+                .to_owned();
+            // NB: `godot_xxx` macros are not working with cargo test, so comment this before running tests
+            godot_print!("rolled: {f}, you got a: {:?} item", pull_result);
+            result.push(self.gacha_by_rarity(pull_result, &mut rng).unwrap());
         }
         result
     }
@@ -125,12 +127,27 @@ impl GachaSystem {
         Ok(res)
     }
 
-    /// Return the coresponding rarity if a pity was hit.
-    fn get_pity(&mut self) -> Option<Rarity> {
+    /// Return a Vec of rarities if a pity was hit.
+    ///
+    /// If a soft pity was hit, meaning there's a chance to get SR or SSR,
+    /// But if a hard pity was hit, the next pull will only be SSR;
+    fn pity_rarities_and_rate(&mut self) -> Option<Vec<(Rarity, f64)>> {
         if self._hard_pity_accu + 1 == self.hard_pity {
-            Some(Rarity::SSR)
+            Some(
+                self.rarities
+                    .iter()
+                    .filter(|(r, _)| *r == Rarity::SSR)
+                    .cloned()
+                    .collect(),
+            )
         } else if self._pity_accu + 1 == self.pity {
-            Some(Rarity::SR)
+            Some(
+                self.rarities
+                    .iter()
+                    .filter(|(r, _)| *r == Rarity::SSR || *r == Rarity::SR)
+                    .cloned()
+                    .collect(),
+            )
         } else {
             None
         }
@@ -223,30 +240,62 @@ mod tests {
     }
 
     #[test]
-    fn pity_system() {
+    fn soft_pity_no_ssr() {
         let mut gacha = GachaSystem {
-            chances: 100,
+            chances: 10,
             rarities: vec![
                 (Rarity::SSR, 0.00),
-                (Rarity::SR, 0.00),
+                (Rarity::SR, 0.001),
                 (Rarity::R, 0.5),
                 (Rarity::N, 0.5),
             ],
-            pity: 10,
+            pity: 1,
             hard_pity: 80,
             data: DATA.clone(),
             ..Default::default()
         };
 
-        let _ = gacha.pull(9);
         let has_sr = gacha.pull(1);
-        // Since the rate of pulling SR is 0, so the 10th pull will always be SR
         assert_eq!(has_sr.get(0).map(|gd| gd.rarity), Some(Rarity::SR));
+    }
 
-        let _ = gacha.pull(69);
-        let has_ssr = gacha.pull(1);
-        // Since the rate of pulling SSR is 0, so the 80th pull will always be SSR
-        assert_eq!(gacha.chances, 20);
-        assert_eq!(has_ssr.get(0).map(|gd| gd.rarity), Some(Rarity::SSR));
+    #[test]
+    fn soft_pity_with_ssr() {
+        let mut gacha = GachaSystem {
+            chances: 10,
+            rarities: vec![
+                (Rarity::SSR, 0.001),
+                (Rarity::SR, 0.0),
+                (Rarity::R, 0.5),
+                (Rarity::N, 0.5),
+            ],
+            pity: 1,
+            hard_pity: 80,
+            data: DATA.clone(),
+            ..Default::default()
+        };
+
+        let has_sr = gacha.pull(1);
+        assert_eq!(has_sr.get(0).map(|gd| gd.rarity), Some(Rarity::SSR));
+    }
+
+    #[test]
+    fn hard_pity() {
+        let mut gacha = GachaSystem {
+            chances: 10,
+            rarities: vec![
+                (Rarity::SSR, 0.1),
+                (Rarity::SR, 0.3),
+                (Rarity::R, 0.3),
+                (Rarity::N, 0.3),
+            ],
+            pity: 10,
+            hard_pity: 1,
+            data: DATA.clone(),
+            ..Default::default()
+        };
+
+        let has_sr = gacha.pull(1);
+        assert_eq!(has_sr.get(0).map(|gd| gd.rarity), Some(Rarity::SSR));
     }
 }
